@@ -17,6 +17,7 @@ services:
       PUID: "${PUID:-1000}"
       PGID: "${PGID:-1000}"
       NIGHTY_BOX64_PROFILE: "${NIGHTY_BOX64_PROFILE:-balanced}"
+      NIGHTY_RPC_GUARD: "${NIGHTY_RPC_GUARD:-auto}"
       NIGHTY_DIAG_DIR: "/app/diagnostics"
       NIGHTY_STUB: "/data/Nighty_stub.exe"
       PYTHONIOENCODING: "${PYTHONIOENCODING:-utf-8}"

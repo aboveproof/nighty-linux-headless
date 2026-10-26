@@ -38,6 +38,7 @@ nighty_load_env_file "$HERE/.env"
 : "${XVFB_TIMEOUT:=10}"
 : "${BLOCK_LRCLIB:=1}"
 : "${NIGHTY_BOX64_PROFILE:=safe}"
+: "${NIGHTY_RPC_GUARD:=auto}"
 # Max seconds to wait for Nighty's stub control server to answer after
 # launching Wine before assuming the boot hung and retrying. Some Wine builds
 # can stall during first-prefix init well before Nighty's own code ever runs.
@@ -59,6 +60,7 @@ export WINEARCH=win64
 export WINEDEBUG=-all
 export DISPLAY=":$DISPLAY_NUM"
 export NIGHTY_STUB_PORT="$STUB_PORT"
+export NIGHTY_RPC_GUARD
 export NIGHTY_STUB_LOG="${NIGHTY_STUB_LOG:-Z:$NIGHTY_DIAG_DIR/stub_webview.log}"
 # Headless DLL overrides. Nighty's GUI is stubbed out and the backend is pure
 # Python, so we disable the Windows components that only crash or hang on a

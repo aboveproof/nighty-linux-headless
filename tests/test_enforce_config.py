@@ -5,6 +5,7 @@ import sys
 import tempfile
 import time
 import unittest
+from unittest import mock
 from pathlib import Path
 
 SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
@@ -14,6 +15,66 @@ import enforce_config  # noqa: E402
 
 
 class EnforceConfigTests(unittest.TestCase):
+    def tearDown(self):
+        enforce_config._ENV_CACHE.update(path=None, mtime=None, vals={})
+
+    def _rpc_profile(self, running=True, startup=True):
+        return {
+            "active_profile": "playing",
+            "profiles": [{"playing": [{"rpc": {"details": "hello"}}]}],
+            "running": running,
+            "run_at_startup": startup,
+        }
+
+    def test_rpc_guard_auto_is_off_on_native_x86(self):
+        with mock.patch.dict(os.environ, {"NIGHTY_RPC_GUARD": "auto"}, clear=False), \
+             mock.patch("enforce_config.platform.machine", return_value="x86_64"):
+            self.assertFalse(enforce_config.rpc_guard_enabled())
+
+    def test_rpc_guard_auto_is_on_for_box64_host(self):
+        with mock.patch.dict(os.environ, {"NIGHTY_RPC_GUARD": "auto"}, clear=False), \
+             mock.patch("enforce_config.platform.machine", return_value="aarch64"):
+            self.assertTrue(enforce_config.rpc_guard_enabled())
+
+    def test_rpc_guard_off_preserves_rpc_profile_state(self):
+        with tempfile.TemporaryDirectory() as tmp, \
+             mock.patch.dict(os.environ, {"NIGHTY_RPC_GUARD": "off"}, clear=False):
+            data_dir = os.path.join(tmp, "data")
+            os.makedirs(data_dir)
+            path = os.path.join(data_dir, "profile.json")
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(self._rpc_profile(), f)
+
+            msg = enforce_config.enforce_safe_presence(tmp)
+
+            with open(path, "r", encoding="utf-8") as f:
+                profile = json.load(f)
+            self.assertIn("guard disabled", msg)
+            self.assertTrue(profile["running"])
+            self.assertTrue(profile["run_at_startup"])
+
+    def test_rpc_guard_on_disables_rpc_profile_state(self):
+        with tempfile.TemporaryDirectory() as tmp, \
+             mock.patch.dict(os.environ, {"NIGHTY_RPC_GUARD": "on"}, clear=False):
+            data_dir = os.path.join(tmp, "data")
+            os.makedirs(data_dir)
+            path = os.path.join(data_dir, "profile.json")
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(self._rpc_profile(), f)
+
+            enforce_config.enforce_safe_presence(tmp)
+
+            with open(path, "r", encoding="utf-8") as f:
+                profile = json.load(f)
+            self.assertFalse(profile["running"])
+            self.assertFalse(profile["run_at_startup"])
+
+    def test_disabled_rpc_guard_never_calls_live_stub(self):
+        with mock.patch.dict(os.environ, {"NIGHTY_RPC_GUARD": "off"}, clear=False), \
+             mock.patch("enforce_config._stub_call") as stub:
+            self.assertIn("guard disabled", enforce_config.stop_unsafe_running_profile())
+            stub.assert_not_called()
+
     def test_enforce_web_backup_and_recovery(self):
         with tempfile.TemporaryDirectory() as tmp:
             appdata = tmp

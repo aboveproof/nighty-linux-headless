@@ -171,6 +171,8 @@ All settings live in `.env` (copy from `.env.example`). Key ones:
 | `STUB_PORT` | stub control server (keep loopback) |
 | `DISPLAY_NUM` | Xvfb display number |
 | `ENFORCE_WEBUI`, `ENFORCE_INTERVAL` | Web UI hard-enforcement |
+| `NIGHTY_RPC_GUARD` | `auto` guards crash-prone RPC profiles only under Box64; `off` leaves them enabled (accepts crash risk) |
+| `BLOCK_LRCLIB` | `1` blocks lyrics/Spotify fetches; set `0` before install for complete RPC integrations |
 | `NIGHTY_INIT_SYSTEM` | force `systemd`, `openrc` or `runit` for autostart (empty = detect) |
 | `BACKEND_FAST_FAIL_SECONDS` | a backend exiting sooner than this counts as a failed start (default `60`) |
 | `BACKEND_MAX_BACKOFF` | ceiling for the relaunch backoff after repeated fast exits (default `300`) |
@@ -274,6 +276,7 @@ If you ever encounter an issue or need help, share the files from your **`diagno
 - **Bot is very slow / "application did not respond"**: On emulated hosts this is caused by Nighty's Rich-Presence task fetching lyrics from `lrclib.net` via blocking calls. `install.sh` blackholes `lrclib.net` in `/etc/hosts` so it fails instantly. On ARM, ensure `NIGHTY_BOX64_PROFILE=balanced`.
 - **The loading screen remains after the stub starts**: If a transient Discord error leaves the backend half-started, the watchdog restarts the backend after `WEBUI_BOOT_TIMEOUT`.
 - **A Rich-Presence preset crashes backend under emulation**: Running an **RPC** preset makes Nighty fetch image assets through `tls-client`, which intermittently segfaults under Box64. The config guard disables auto-start for RPC profiles to prevent boot-loops.
+- **RPC/User Profiles immediately turns itself off**: `NIGHTY_RPC_GUARD=auto` stops RPC profiles only when Nighty is running through Box64. To accept the crash risk and keep RPC enabled on ARM, set `NIGHTY_RPC_GUARD=off` in `.env` and restart. For bare-metal installs, set `BLOCK_LRCLIB=0` *before rerunning the installer* if you also need lyrics/Spotify requests; existing `/etc/hosts` blackhole entries must be removed with `scripts/uninstall.sh` or manually. Docker users must additionally remove the three RPC `extra_hosts` entries from `docker-compose.yml`, then recreate the container.
 - **"Error downloading sound ... HTTP Error 403: Forbidden"**: Cloudflare blocks Nighty's default `urllib` agent. The config enforcer pre-seeds `data/sounds/` using a browser User-Agent at launch to skip the blocked request.
 </details>
 

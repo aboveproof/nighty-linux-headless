@@ -13,10 +13,10 @@ It also keeps data/profile.json ASCII-encoded so Nighty (which reads it with the
 cp1252 default under Wine) can always read it back; otherwise emoji in a profile
 make the panel's "save profile" fail with HTTP 500.
 
-For Rich Presence it is type-aware: only RPC presets crash the backend under
-Box64 (image-asset fetch), so it disables auto-start / stops in memory ONLY for
-RPC-type active profiles. Custom-status rotators are safe and left under the
-user's control, so "Run last active profile on startup" works for them.
+For Rich Presence it is type-aware and architecture-aware: only RPC presets on
+Box64 hit the known image-asset crash, so ``NIGHTY_RPC_GUARD=auto`` suppresses
+them only on emulated hosts. Set the guard to ``off`` to accept that risk and
+leave RPC profiles entirely under the user's control.
 
 Started in the background by run.sh (and supervised by systemd). It writes only
 when something actually changed, so it never fights Nighty's own writes.
@@ -45,8 +45,9 @@ def main():
     # cutting main-thread contention ~6x with no loss of auto-start protection.
     rp_interval = float(os.environ.get("RP_GUARD_INTERVAL", "30"))
     rotate_interval = float(os.environ.get("ROTATE_INTERVAL", "900"))
+    rpc_state = "enabled" if ec.rpc_guard_enabled() else "disabled"
     print(f"[guard] Web UI hard-enforcement active (every {interval}s; "
-          f"RP in-memory guard every {rp_interval}s; "
+          f"RP guard {rpc_state}, in-memory poll every {rp_interval}s; "
           f"log rotation every {rotate_interval}s)")
     last_rp = 0.0
     last_rotate = time.time()

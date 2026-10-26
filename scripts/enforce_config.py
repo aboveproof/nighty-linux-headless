@@ -19,7 +19,7 @@ stale or empty environment — e.g. after a configuration reset, or detached fro
 run.sh — so we never silently fall back to a hardcoded default while a `.env`
 exists.
 """
-import os, sys, json, glob, shutil, time
+import os, sys, json, glob, shutil, time, platform
 import urllib.request
 
 
@@ -253,6 +253,26 @@ def _active_profile_is_rpc(d):
     return False
 
 
+def rpc_guard_enabled():
+    """Whether Nighty's RPC crash guard should actively suppress profiles.
+
+    ``auto`` protects only non-x86 hosts, where the Windows backend runs through
+    Box64. Native x86-64 Wine does not have the Box64 tls-client crash this guard
+    was added for, so silently disabling the feature there is both unnecessary
+    and surprising. Users on ARM can explicitly accept the risk with ``off``.
+    """
+    mode = str(env("NIGHTY_RPC_GUARD", "auto") or "auto").strip().lower()
+    if mode in ("0", "off", "false", "no", "disabled"):
+        return False
+    if mode in ("1", "on", "true", "yes", "enabled"):
+        return True
+    if mode != "auto":
+        # Fail safe for a typo instead of unexpectedly enabling a known-crashy
+        # code path on an emulated host.
+        return True
+    return platform.machine().lower() not in ("x86_64", "amd64")
+
+
 def enforce_safe_presence(appdata):
     """Keep data/profile.json readable by Nighty, and stop only crash-prone
     presets from auto-running — without clobbering the user's startup choice for
@@ -272,12 +292,14 @@ def enforce_safe_presence(appdata):
     if not isinstance(d, dict):
         return "skip (no profile.json)"
     changed = False
-    if _active_profile_is_rpc(d):
+    if _active_profile_is_rpc(d) and rpc_guard_enabled():
         note = "RPC profile — auto-start disabled (Box64 crash hazard)"
         for k in ("running", "run_at_startup"):
             if d.get(k) is not False:
                 d[k] = False
                 changed = True
+    elif _active_profile_is_rpc(d):
+        note = "RPC profile — guard disabled; startup left to user"
     else:
         note = "custom-status profile — startup left to user"
     if changed or _has_non_ascii(path):
@@ -305,6 +327,8 @@ def stop_unsafe_running_profile():
     an already-running rotator). Leaves safe custom-status profiles running, so
     the user's startup choice is honoured for them. Cheap no-op when nothing runs
     or the runner is a custom-status profile."""
+    if not rpc_guard_enabled():
+        return "skip (RPC guard disabled)"
     res = _stub_call("getUserProfiles")
     if not res or not res.get("ok"):
         return "skip (stub not ready)"
