@@ -6,6 +6,12 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class DockerSafetyTests(unittest.TestCase):
+    def test_rpc_override_disables_guard_and_resets_blackholes(self):
+        override = (ROOT / "docker-compose.rpc.yml").read_text(encoding="utf-8")
+        self.assertIn('NIGHTY_RPC_GUARD: "off"', override)
+        self.assertIn('BLOCK_LRCLIB: "0"', override)
+        self.assertIn("extra_hosts: !reset []", override)
+
     def test_image_never_copies_the_whole_repository(self) -> None:
         dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
         self.assertNotIn("COPY . /app", dockerfile)

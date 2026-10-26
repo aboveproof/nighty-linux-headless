@@ -1,0 +1,12 @@
+# Optional override for users who explicitly want Nighty's complete RPC/User
+# Profiles feature. The base compose file blackholes these hosts because the
+# synchronous requests can stall or crash the backend under Box64.
+#
+# Run with:
+#   docker compose -f docker-compose.yml -f docker-compose.rpc.yml up -d
+services:
+  nighty:
+    environment:
+      NIGHTY_RPC_GUARD: "off"
+      BLOCK_LRCLIB: "0"
+    extra_hosts: !reset []
