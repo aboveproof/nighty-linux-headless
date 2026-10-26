@@ -27,18 +27,18 @@ class EnforceConfigTests(unittest.TestCase):
         }
 
     def test_rpc_guard_auto_is_off_on_native_x86(self):
-        with mock.patch.dict(os.environ, {"NIGHTY_RPC_GUARD": "auto"}, clear=False), \
+        with mock.patch("enforce_config.env", return_value="auto"), \
              mock.patch("enforce_config.platform.machine", return_value="x86_64"):
             self.assertFalse(enforce_config.rpc_guard_enabled())
 
     def test_rpc_guard_auto_is_on_for_box64_host(self):
-        with mock.patch.dict(os.environ, {"NIGHTY_RPC_GUARD": "auto"}, clear=False), \
+        with mock.patch("enforce_config.env", return_value="auto"), \
              mock.patch("enforce_config.platform.machine", return_value="aarch64"):
             self.assertTrue(enforce_config.rpc_guard_enabled())
 
     def test_rpc_guard_off_preserves_rpc_profile_state(self):
         with tempfile.TemporaryDirectory() as tmp, \
-             mock.patch.dict(os.environ, {"NIGHTY_RPC_GUARD": "off"}, clear=False):
+             mock.patch("enforce_config.env", return_value="off"):
             data_dir = os.path.join(tmp, "data")
             os.makedirs(data_dir)
             path = os.path.join(data_dir, "profile.json")
@@ -55,7 +55,7 @@ class EnforceConfigTests(unittest.TestCase):
 
     def test_rpc_guard_on_disables_rpc_profile_state(self):
         with tempfile.TemporaryDirectory() as tmp, \
-             mock.patch.dict(os.environ, {"NIGHTY_RPC_GUARD": "on"}, clear=False):
+             mock.patch("enforce_config.env", return_value="on"):
             data_dir = os.path.join(tmp, "data")
             os.makedirs(data_dir)
             path = os.path.join(data_dir, "profile.json")
@@ -70,7 +70,7 @@ class EnforceConfigTests(unittest.TestCase):
             self.assertFalse(profile["run_at_startup"])
 
     def test_disabled_rpc_guard_never_calls_live_stub(self):
-        with mock.patch.dict(os.environ, {"NIGHTY_RPC_GUARD": "off"}, clear=False), \
+        with mock.patch("enforce_config.env", return_value="off"), \
              mock.patch("enforce_config._stub_call") as stub:
             self.assertIn("guard disabled", enforce_config.stop_unsafe_running_profile())
             stub.assert_not_called()
