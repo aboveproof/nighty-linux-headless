@@ -61,6 +61,10 @@ You only need three things — **the installer handles the rest**:
 
 ## Quick Start
 
+### Cloud app hosting (Northflank and other persistent-container hosts)
+
+For a public HTTPS URL without managing a server, see the [cloud hosting guide](docs/CLOUD_HOSTING.md). It uses this Dockerfile with a persistent volume and a cloud-specific start command. The guide identifies which current free plans can actually keep Nighty's data and process running.
+
 ### Method 1: Docker (Recommended)
 *Supported on **x86-64 (`amd64`)** and **64-bit ARM (`arm64`, including Raspberry Pi 5)**.*
 

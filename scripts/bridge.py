@@ -1290,7 +1290,10 @@ class H(BaseHTTPRequestHandler):
                     "uptime_seconds": round(time.time() - START_TIME, 2),
                     "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
                 }
-                return self._send(json.dumps(resp), "application/json", code=200 if up else 503)
+                # /healthz is liveness for container hosts during first-run setup;
+                # /ready remains strict for callers that need the Nighty panel.
+                live = self.path.split("?", 1)[0] == "/healthz"
+                return self._send(json.dumps(resp), "application/json", code=200 if live or up else 503)
             if self.path == "/" or self.path.startswith("/ui"):
                 return self._send(build_ui())
             if self.path.startswith("/state"):

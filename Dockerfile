@@ -71,7 +71,7 @@ ENV WEBUI_HOST=127.0.0.1 \
     SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt \
     SSL_CERT_DIR=/etc/ssl/certs
 
-USER nighty
+USER nighty:nighty
 
 # Persist data outside the container
 VOLUME ["/data"]
@@ -79,6 +79,6 @@ VOLUME ["/data"]
 EXPOSE 8088
 
 HEALTHCHECK --interval=15s --timeout=5s --start-period=360s --retries=4 \
-  CMD curl -fsS http://127.0.0.1:8088/ready | grep -q '"ready": true' || exit 1
+  CMD curl -fsS "http://127.0.0.1:${BRIDGE_PORT:-${PORT:-8088}}/ready" | grep -q '"ready": true' || exit 1
 
 CMD ["bash", "scripts/docker-entrypoint.sh"]
