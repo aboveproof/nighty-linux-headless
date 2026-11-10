@@ -19,24 +19,7 @@ Synthetic keep-alive pings do not solve data loss or resource limits.
 
 ## Northflank Sandbox setup
 
-1. Fork this repository to your Git account. Do not add `Nighty.exe`, `.env`, tokens, or a license key.
-2. Create a Northflank Sandbox project and a **combined service** from your fork. Choose the root `Dockerfile` as build method. Use **one** instance and the largest CPU/RAM plan within the free allowance.
-3. Add a **Single Read/Write** volume mounted at **`/data`**. The image specifies `USER nighty:nighty` for [volume permissions](https://northflank.com/docs/v1/application/databases-and-persistence/add-a-volume).
-4. Set the service command to **`bash /app/scripts/cloud-entrypoint.sh`**. Expose container port **`8088`** as public **HTTP(S)/1.1**. Northflank supplies HTTPS and supports WebSockets. If you set `PORT`, set it to `8088`. [Port setup](https://northflank.com/docs/v1/application/network/configure-ports).
-5. Add these **runtime** variables in the service Environment section:
-
-   - `WEBUI_USERNAME`: a username you choose
-   - `WEBUI_PASSWORD`: a unique password of at least 8 characters
-   - `NIGHTY_EXE_URL`: a **private HTTPS download URL** for your licensed executable
-   - `NIGHTY_EXE_SHA256`: its SHA-256 digest (64 hex characters)
-
-   These are runtime secrets, not build arguments. A signed, expiring object-storage URL works: the executable downloads once to `/data/Nighty.exe`; later starts use the copy on the volume. Keep the URL valid through the first successful download. Alternatively, securely transfer the file to `/data/Nighty.exe` on the running service and omit both URL variables. Northflank [supports transferring files to a mounted volume](https://northflank.com/docs/v1/application/databases-and-persistence/add-a-volume).
-
-6. Deploy and open the HTTPS URL. Complete the existing Nighty setup wizard with your own license and account credentials. First boot may take several minutes while it prepares Wine and the stub. Watch the service logs if it fails.
-
-Get the SHA-256 on Windows with `Get-FileHash .\Nighty.exe -Algorithm SHA256`, or on Linux with `sha256sum Nighty.exe`.
-
-The bridge's `/healthz` endpoint checks that the bridge is running. `/ready` is stricter and reports `ready: true` only when the native Nighty panel is up. For a platform health check during onboarding, use `/healthz` so it does not restart the wizard before setup is done.
+Follow the [Northflank setup in the README](../README.md#northflank-step-by-step-setup). It walks through the Create new form shown in the Northflank app, then adds the volume from the service page. Use the `codex/cloud-hosting` branch of the aboveproof fork.
 
 ## Other persistent-container hosts
 

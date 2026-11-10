@@ -5,7 +5,7 @@
 It repackages Nighty to run on Linux servers. On **x86-64**, Nighty runs under Wine, which translates its Windows API calls into native POSIX ones. On **ARM64** (like Raspberry Pi), it additionally runs through an x86-64 emulator (Box64) under Wine. 
 
 > [!WARNING]
-> **Disclaimer:** This is an unofficial, community interop/automation tool. It is **not** affiliated with or endorsed by Nighty. It does **not** include, redistribute, crack, or unlicense Nighty — you must supply your own legally obtained copy and valid license. Nighty is a Discord **selfbot**; automating a user account can violate Discord's Terms of Service. Use it only with your own account, on your own hardware, at your own risk.
+> **Disclaimer:** This is an unofficial, community interop/automation tool. It is **not** affiliated with or endorsed by Nighty. It does **not** include, redistribute, crack, or unlicense Nighty; you must supply your own legally obtained copy and valid license. Nighty is a Discord **selfbot**; automating a user account can violate Discord's Terms of Service. Use it only with your own account and at your own risk.
 
 ---
 
@@ -61,9 +61,66 @@ You only need three things — **the installer handles the rest**:
 
 ## Quick Start
 
-### Cloud app hosting (Northflank and other persistent-container hosts)
+### Northflank: step-by-step setup
 
-For a public HTTPS URL without managing a server, see the [cloud hosting guide](docs/CLOUD_HOSTING.md). It uses this Dockerfile with a persistent volume and a cloud-specific start command. The guide identifies which current free plans can actually keep Nighty's data and process running.
+These steps match Northflank's **Create new → Service** form. They use the [`codex/cloud-hosting` branch of the aboveproof fork](https://github.com/aboveproof/nighty-linux-headless/tree/codex/cloud-hosting). The service runs the Docker image in this repository. A volume at `/data` keeps the Nighty executable, Wine files, settings, and logs when Northflank replaces the container.
+
+You need your own `Nighty.exe`, a valid Nighty license, a private direct-download URL for the executable, and its SHA-256 hash. Keep the executable and credentials out of GitHub. A URL that opens a file-sharing preview page will not work; the URL must return the executable itself. If your link expires, keep it valid until the first successful download. After that, the copy on `/data` is used at each start.
+
+#### 1. Fill in the service form
+
+1. Open Northflank, enter your project, choose **Services**, then **Create new**. Leave the resource type at **Service** and choose a region. Your screenshot shows **US - Central**; that is fine.
+2. Under **Basic information**, enter a name such as `nighty`. Leave **Environment** at `Default`. You can leave **Tags** empty.
+3. Under **Source**, select **Combined: Build and deploy a Git repo**. Set **Repository** to `aboveproof/nighty-linux-headless` and **Branch** to `codex/cloud-hosting`. The cloud start script is on that branch. If Northflank shows a different branch, change it before creating the service.
+4. Under **Build options**, choose **Dockerfile**. Set **Build context** to `/` and **Dockerfile location** to `/Dockerfile`. Keep **Dockerfile source** on **Repository**. The code preview below it should show this project's Dockerfile. You can leave **Continuous integration** enabled so later pushes rebuild the service.
+5. Under **Resources**, choose **CPU**, then select a compute plan. Your screenshot shows `nf-compute-20`, with 0.2 shared vCPU and 512 MB RAM. Leave **Instances** at `1`. Nighty runs a Windows program through Wine, so 512 MB may run out of memory. Check the plan and price before choosing a larger one; the free plan may limit your choices.
+6. Under **Networking**, find the detected port **8088**. Keep the port number at `8088`. Change **Protocol** from **TCP** to **HTTP** (or **HTTP/1.1** if that is the label), then change **Accessibility** from **Private** to **Public**. Northflank should show a public `code.run` address for that port. This change is essential: a private TCP port will not give you a browser URL. You do not need a second port.
+7. Under **Environment variables → Runtime variables**, add the four keys below. Enter your own values; the words in angle brackets are examples, not literal values. Leave **Build arguments** empty. These settings belong at runtime, after the image builds.
+
+   ```text
+   WEBUI_USERNAME=<your-login-name>
+   WEBUI_PASSWORD=<your-unique-password-at-least-8-characters>
+   NIGHTY_EXE_URL=<private-https-link-that-downloads-Nighty.exe>
+   NIGHTY_EXE_SHA256=<64-character-sha256-of-that-exact-file>
+   ```
+
+   To get the hash on Windows, open PowerShell in the folder containing your executable and run:
+
+   ```powershell
+   Get-FileHash .\Nighty.exe -Algorithm SHA256
+   ```
+
+   Copy only the **Hash** value into `NIGHTY_EXE_SHA256`. The download link and hash must refer to the same file. Keep the password and download link private. If you have already shared a screenshot that shows them, replace the password and revoke or replace the link before using the service.
+
+8. Expand **Advanced** near the bottom of the form. Under **Docker runtime**, change **Default configuration** to **Custom command**. Enter this command exactly:
+
+   ```text
+   bash /app/scripts/cloud-entrypoint.sh
+   ```
+
+   Northflank may label this setting **CMD override**. You only need a custom command; leave the entrypoint alone. The Dockerfile's default command is for local Docker use and expects `Nighty.exe` at a different path.
+9. Leave **Health checks** empty for the first deployment. Nighty needs time to download the executable, prepare Wine, and complete setup. Once it works, you can add an HTTP check on port `8088` with path `/healthz`. Do not use `/ready` as a startup check; it fails until the Nighty panel starts.
+10. At **Payment method**, your current form requires a card before it will create the service. Northflank says the card verifies your account and shows one free project with limited resources after verification. Check the plan and any charges on this screen. Enter the card yourself, then click **Create service**.
+
+#### 2. Add the persistent volume
+
+Northflank's form in your screenshot does not show a volume field. Add the volume from the service page after you create the service. The first container may fail with a missing executable or `/data` error until you finish this step.
+
+1. Open the new `nighty` service and choose **Volumes** in its menu. Click **Add volume**.
+2. Give it a name such as `nighty-data`. Choose **Single Read/Write**. This project uses one container and one Wine prefix.
+3. Choose a size that fits the executable, Wine prefix, and logs. Check Northflank's free allowance and any cost shown before saving. You can increase a volume later, but Northflank does not let you shrink it.
+4. Set **Container mount path** to `/data`. Leave **Volume mount path** empty. Save the volume and wait for the service to restart. The volume must be mounted at exactly `/data`; another path will not match the start script. [Northflank volume instructions](https://northflank.com/docs/v1/application/databases-and-persistence/add-a-volume).
+
+#### 3. Check the deployment
+
+1. Open the service's **Builds** or **Logs** view. Wait for the Docker build to finish. A build error happens before Nighty runs; a runtime error appears in the container logs after the build.
+2. The start script should download `Nighty.exe` once, verify its hash, run the preflight installer, and start the bridge. If it reports a hash mismatch, check that the URL downloads the same executable you hashed. If it reports that `/data` is not writable, check the volume mount and permissions.
+3. Open the public HTTPS address attached to port `8088`. Follow Nighty's setup wizard and enter your own license and account credentials there. The first start can take several minutes. Do not put those credentials in GitHub or the Northflank build arguments.
+4. Once the panel loads, visit `<your-public-url>/ready`. It should return JSON with `"ready": true`. If it returns `503`, read the container logs. `<your-public-url>/healthz` reports whether the bridge itself is running.
+
+Northflank's [service guide](https://northflank.com/docs/v1/application/getting-started/build-and-deploy-your-code), [command override guide](https://northflank.com/docs/v1/application/run/override-command-entrypoint), and [port guide](https://northflank.com/docs/v1/application/network/configure-ports) describe the same controls if the form labels change.
+
+For the limits of other free providers, see [Cloud hosting](docs/CLOUD_HOSTING.md).
 
 ### Method 1: Docker (Recommended)
 *Supported on **x86-64 (`amd64`)** and **64-bit ARM (`arm64`, including Raspberry Pi 5)**.*
