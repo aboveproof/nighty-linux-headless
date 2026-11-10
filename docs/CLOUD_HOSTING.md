@@ -8,7 +8,7 @@ Checked November 10, 2026:
 
 | Provider | Free-plan result for Nighty |
 | --- | --- |
-| [Northflank Sandbox](https://northflank.com/pricing) | **Best candidate.** Advertises always-on services, Docker builds, and volumes within its free Sandbox allowance. Whether Nighty fits its CPU/RAM must be tested. |
+| [Northflank Sandbox](https://northflank.com/pricing) | **Best app-hosting candidate.** Try its 1 GB `nf-compute-50` plan if your free account permits it. The listed $12/month compute cost leaves part of the advertised $20/month allowance for storage. The 512 MB default may be too small; the 2 GB plan costs more than the allowance. Nighty's actual memory use still needs a live test. |
 | [Oracle Cloud Always Free](https://docs.oracle.com/en-us/iaas/Content/FreeTier/freetier_topic-Always_Free_Resources.htm) | Can run the existing Docker Compose setup on an Always Free VM, but requires administering Linux. Arm instances need Box64. Capacity is not guaranteed. |
 | [Railway Free](https://docs.railway.com/pricing/free-trial) | $1/month after the trial. Useful to experiment, but unlikely to fund a 24/7 Wine container. |
 | [Render Free](https://render.com/docs/free) | Sleeps after 15 idle minutes and cannot attach a persistent disk. Not suitable. |
