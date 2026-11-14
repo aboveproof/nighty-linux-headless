@@ -266,7 +266,7 @@ If you ever encounter an issue or need help, share the files from your **`diagno
 <details>
 <summary><b>Click to view advanced troubleshooting & bug fixes...</b></summary>
 
-- **Repack fails / "bad marshal data"**: The repack must run under Python 3.8. Let `install.sh` use the `uv`-provided 3.8 interpreter.
+- **Repack fails / "bad marshal data"**: Marshal bytecode must match the Python embedded in that specific Nighty.exe. Re-run `install.sh`; it reads the PyInstaller cookie and uses `uv` to fetch the exact version automatically (including newer tester builds such as Python 3.14).
 - **Backend never opens 8090**: It only starts after a successful login. Open the bridge and complete the onboarding flow.
 - **Disk usage grows after repeated backend restarts**: Forced watchdog exits cannot remove Nighty's `_MEI*` extraction directory. `run.sh` now removes stale directories automatically. To clean manually, stop Nighty and run `bash scripts/cleanup_mei.sh`.
 - **On x86-64, the backend hangs at startup (no `[STUBWV]` logs)**: Your distro Wine is too old (Wine 6-9). The installer detects this and falls back to a static Wine 10 build automatically. Re-run `bash scripts/install.sh`.

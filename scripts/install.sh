@@ -7,7 +7,7 @@
 #
 #  What it sets up (only if missing):
 #    • base tools (curl, tar, xz, gnupg)         • Python 3
-#    • Xvfb (virtual display)                     • uv (fetches Python 3.8)
+#    • Xvfb (virtual display)                     • uv (fetches matching Python)
 #    • x86-64:  Wine (native, from your distro — or a static build if it's <10)
 #    • non-x86: Box64  +  a static x86-64 Wine build (runs under Box64)
 #
@@ -186,7 +186,7 @@ ensure tar  tar  "tar"
 ensure python3 python3 "Python 3"
 ensure Xvfb    xvfb    "Xvfb (virtual display)"
 
-# ── 3) uv (used to fetch Python 3.8 for the repack) ──────────────────────────
+# ── 3) uv (used to fetch Nighty's exact Python for the repack) ───────────────
 if need uv; then
   ok "uv present"
 else
@@ -363,15 +363,20 @@ else
   python3 "$PREFLIGHT" pe "$SRC" --require-x64 || die "ARM/Box64 requires a 64-bit x86-64 Nighty.exe."
 fi
 
-# ── 7) repack (must run under Python 3.8 — marshal format is version-specific) ─
-info "Ensuring Python 3.8 (via uv) for the repack…"
-uv python install 3.8 >/dev/null 2>&1 || true
-PY38="$(uv python find 3.8 2>/dev/null || true)"
-[ -n "$PY38" ] || die "Could not obtain Python 3.8 via uv."
-ok "Python 3.8: $PY38"
+# ── 7) repack (marshal bytecode must match Nighty's embedded Python) ─────────
+REPACK_PY_VERSION="$(python3 scripts/repack.py --print-python-version "$SRC" 2>/dev/null || true)"
+case "$REPACK_PY_VERSION" in
+  3.[0-9]|3.[0-9][0-9]) : ;;
+  *) die "Could not detect Nighty's embedded Python version from its PyInstaller cookie." ;;
+esac
+info "Ensuring matching Python $REPACK_PY_VERSION (via uv) for the repack…"
+uv python install "$REPACK_PY_VERSION" >/dev/null 2>&1 || true
+REPACK_PYTHON="$(uv python find "$REPACK_PY_VERSION" 2>/dev/null || true)"
+[ -n "$REPACK_PYTHON" ] || die "Could not obtain Python $REPACK_PY_VERSION via uv."
+ok "Python $REPACK_PY_VERSION: $REPACK_PYTHON"
 
 info "Repacking $(basename "$SRC") → $(basename "$OUT") (headless webview stub)…"
-NIGHTY_EXE="$SRC" NIGHTY_STUB="$OUT" "$PY38" scripts/repack.py "$SRC" "$OUT" || die "Repack failed."
+NIGHTY_EXE="$SRC" NIGHTY_STUB="$OUT" "$REPACK_PYTHON" scripts/repack.py "$SRC" "$OUT" || die "Repack failed."
 if [ "$IS_X86" = 1 ]; then
   python3 "$PREFLIGHT" pe "$OUT" || die "Generated stub failed PE validation."
 else

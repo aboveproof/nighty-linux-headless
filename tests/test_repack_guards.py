@@ -16,6 +16,11 @@ ENTRY = struct.Struct("!IIIIBc")
 REPACK_TIMEOUT = 60
 
 
+def current_cookie_version() -> int:
+    major, minor = sys.version_info[:2]
+    return major * 100 + minor if minor >= 10 else major * 10 + minor
+
+
 def run_repack(src: Path, out: Path) -> subprocess.CompletedProcess:
     return subprocess.run(
         [sys.executable, str(REPACK), str(src), str(out)],
@@ -25,16 +30,52 @@ def run_repack(src: Path, out: Path) -> subprocess.CompletedProcess:
     )
 
 
-def build_archive_with_toc(toc: bytes) -> bytes:
+def build_archive_with_toc(toc: bytes, pyvers: int | None = None) -> bytes:
     prefix = b"MZ" + b"\0" * 254
     tocpos = 0
     toclen = len(toc)
     lenpkg = toclen + 88
-    cookie = struct.pack("!8sIIII", COOKIE_MAGIC, lenpkg, tocpos, toclen, 38) + b"\0" * 64
+    cookie = struct.pack(
+        "!8sIIII", COOKIE_MAGIC, lenpkg, tocpos, toclen,
+        current_cookie_version() if pyvers is None else pyvers,
+    ) + b"\0" * 64
     return prefix + toc + cookie
 
 
 class RepackOutputGuardTests(unittest.TestCase):
+    def test_prints_legacy_python_version_from_cookie(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            src = Path(tmp) / "Nighty.exe"
+            src.write_bytes(build_archive_with_toc(b"", pyvers=38))
+            result = subprocess.run(
+                [sys.executable, str(REPACK), "--print-python-version", str(src)],
+                capture_output=True, text=True, timeout=REPACK_TIMEOUT,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(result.stdout.strip(), "3.8")
+
+    def test_prints_python_314_version_from_tester_cookie(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            src = Path(tmp) / "Nighty-tester.exe"
+            src.write_bytes(build_archive_with_toc(b"", pyvers=314))
+            result = subprocess.run(
+                [sys.executable, str(REPACK), "--print-python-version", str(src)],
+                capture_output=True, text=True, timeout=REPACK_TIMEOUT,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(result.stdout.strip(), "3.14")
+
+    def test_refuses_mismatched_python_before_writing_output(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            src = Path(tmp) / "Nighty.exe"
+            out = Path(tmp) / "Nighty_stub.exe"
+            mismatch = 38 if sys.version_info[:2] != (3, 8) else 314
+            src.write_bytes(build_archive_with_toc(b"", pyvers=mismatch))
+            result = run_repack(src, out)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("marshal formats must match", (result.stdout + result.stderr).lower())
+            self.assertFalse(out.exists())
+
     def test_refuses_to_write_over_the_source(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             src = Path(tmp) / "Nighty.exe"

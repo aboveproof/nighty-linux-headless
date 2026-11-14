@@ -69,9 +69,13 @@ if need docker && [ -f "$HERE/docker-compose.yml" ]; then
 fi
 
 if [ "$is_docker" -eq 1 ]; then
-  info "Detected Docker deployment. Restarting container with new updates..."
-  if docker compose up -d && docker compose restart nighty; then
-    ok "Docker container successfully updated and restarted!"
+  info "Detected Docker deployment. Recreating Nighty with the latest files..."
+  # Recreate instead of merely restarting: Nighty.exe is a read-only bind mount,
+  # and SFTP clients commonly replace it by renaming a temporary file. A restart
+  # can retain the old mounted inode; recreation guarantees the new executable is
+  # mounted and makes docker-entrypoint repack it with the matching Python.
+  if docker compose up -d --force-recreate --no-deps nighty; then
+    ok "Docker container successfully updated and recreated!"
   else
     warn "Failed to restart Docker container."
   fi

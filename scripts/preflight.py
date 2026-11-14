@@ -92,8 +92,8 @@ KNOWN_FAILURES = (
     (
         "bad-marshal-data",
         re.compile(r"bad marshal data"),
-        "The repack ran under the wrong Python. The embedded code objects are 3.8 bytecode and the "
-        "marshal format is version-specific; let install.sh use the uv-provided 3.8 interpreter.",
+        "The repack ran under the wrong Python. Marshal formats are version-specific; re-run "
+        "scripts/install.sh so it can detect Nighty's embedded runtime and fetch the exact interpreter via uv.",
     ),
     (
         "missing-license",

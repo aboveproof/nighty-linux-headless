@@ -11,19 +11,54 @@ Nighty's license check or its protected code.
   • The stub captures the JS-API bridge and exposes a loopback-only control
     server (default 127.0.0.1:8765) used during first-run onboarding.
 
-IMPORTANT: run this under Python 3.8 — the frozen runtime is 3.8 and the
-marshal format of the embedded archive must match. The installer fetches a
-3.8 interpreter via `uv` for exactly this step.
+IMPORTANT: the marshal format of the injected code must match Nighty's embedded
+Python runtime. The installer reads that version from the PyInstaller cookie and
+fetches the exact interpreter through `uv` before invoking this script.
 
 Usage:
-    python3.8 repack.py [SRC.exe] [OUT.exe]
+    python repack.py [SRC.exe] [OUT.exe]
+    python repack.py --print-python-version [SRC.exe]
 Env:
     NIGHTY_STUB_PORT   control-server port inside the stub (default 8765)
     NIGHTY_STUB_LOG    optional wine path for the stub log (e.g. Z:\\tmp\\stub.log)
 """
-import struct, marshal, zlib, sys, os, errno
+import struct, marshal, zlib, sys, os, errno, importlib.util
 
 BIND_MOUNT_ERRNOS = (errno.EBUSY, errno.EXDEV)
+CARCHIVE_MAGIC = b'MEI\014\013\012\013\016'
+COOKIE_PREFIX = struct.Struct("!8sIIII")
+COOKIE_SIZE = 88
+
+
+def python_version_from_cookie(pyvers):
+    """Convert PyInstaller's compact cookie value (38, 310, 314) to (3, n)."""
+    if pyvers >= 100:
+        version = (pyvers // 100, pyvers % 100)
+    else:
+        version = (pyvers // 10, pyvers % 10)
+    if version[0] != 3 or not (0 <= version[1] <= 99):
+        raise ValueError("unsupported PyInstaller Python version value %r" % pyvers)
+    return version
+
+
+def read_cookie(path):
+    if not os.path.isfile(path):
+        raise ValueError("source binary not found: %s (drop your Nighty.exe there)" % path)
+    with open(path, "rb") as fh:
+        data = fh.read()
+    ci = data.rfind(CARCHIVE_MAGIC)
+    if ci < 0 or ci + COOKIE_SIZE > len(data):
+        raise ValueError("PyInstaller CArchive cookie not found — is this a Nighty one-file exe?")
+    mg, lenpkg, tocpos, toclen, pyvers = COOKIE_PREFIX.unpack(data[ci:ci + COOKIE_PREFIX.size])
+    try:
+        pyversion = python_version_from_cookie(pyvers)
+    except ValueError as exc:
+        raise ValueError(str(exc))
+    return data, ci, lenpkg, tocpos, toclen, pyvers, pyversion
+
+
+def python_version_text(version):
+    return "%d.%d" % version
 
 
 def write_output(path, payload):
@@ -53,9 +88,6 @@ def write_output(path, payload):
         pass
     return "in-place (target is a bind mount)"
 
-
-SRC = sys.argv[1] if len(sys.argv) > 1 else os.environ.get("NIGHTY_EXE", "Nighty.exe")
-OUT = sys.argv[2] if len(sys.argv) > 2 else os.environ.get("NIGHTY_STUB", "Nighty_stub.exe")
 
 # The stub `webview` module. Port and log path are read from the environment at
 # runtime (inside wine), so nothing is hardcoded.
@@ -280,23 +312,37 @@ def compile_blob(name, src):
     code = compile(src, '<stub:%s>' % name, 'exec')
     return zlib.compress(marshal.dumps(code), 9)
 
-def main():
-    if not os.path.isfile(SRC):
-        sys.exit("ERROR: source binary not found: %s (drop your Nighty.exe there)" % SRC)
-    if os.path.abspath(OUT) == os.path.abspath(SRC):
-        sys.exit("ERROR: output path must differ from the source path (%s) — refusing to overwrite your licensed binary." % SRC)
-    if sys.version_info[:2] != (3, 8):
-        print("WARNING: not running under Python 3.8 (got %d.%d). The marshal format"
-              " must match the frozen runtime; use the uv-provided 3.8 interpreter."
-              % sys.version_info[:2])
-    data = open(SRC, "rb").read()
+def main(argv=None):
+    args = list(sys.argv[1:] if argv is None else argv)
+    if args and args[0] == "--print-python-version":
+        if len(args) != 2:
+            sys.exit("ERROR: usage: repack.py --print-python-version Nighty.exe")
+        try:
+            cookie = read_cookie(args[1])
+        except ValueError as exc:
+            sys.exit("ERROR: %s" % exc)
+        print(python_version_text(cookie[-1]))
+        return 0
+
+    src = args[0] if args else os.environ.get("NIGHTY_EXE", "Nighty.exe")
+    out_path = args[1] if len(args) > 1 else os.environ.get("NIGHTY_STUB", "Nighty_stub.exe")
+    if len(args) > 2:
+        sys.exit("ERROR: usage: repack.py [SRC.exe] [OUT.exe]")
+    if os.path.abspath(out_path) == os.path.abspath(src):
+        sys.exit("ERROR: output path must differ from the source path (%s) — refusing to overwrite your licensed binary." % src)
+    try:
+        data, ci, lenpkg, tocpos, toclen, pyvers, required_python = read_cookie(src)
+    except ValueError as exc:
+        sys.exit("ERROR: %s" % exc)
+    running_python = sys.version_info[:2]
+    if running_python != required_python:
+        sys.exit(
+            "ERROR: Nighty.exe embeds Python %s but repack.py is running under Python %s. "
+            "The marshal formats must match; run scripts/install.sh so uv can select the exact interpreter."
+            % (python_version_text(required_python), python_version_text(running_python))
+        )
     total = len(data)
-    cmagic = b'MEI\014\013\012\013\016'
-    ci = data.rfind(cmagic)
-    if ci < 0:
-        sys.exit("ERROR: PyInstaller CArchive cookie not found — is this a Nighty one-file exe?")
-    mg, lenpkg, tocpos, toclen, pyvers = struct.unpack("!8sIIII", data[ci:ci+24])
-    pylib_field = data[ci+24:ci+24+64]
+    pylib_field = data[ci + COOKIE_PREFIX.size:ci + COOKIE_SIZE]
     ps = total - lenpkg
     toc = data[ps+tocpos:ps+tocpos+toclen]
     ENTRY = struct.Struct("!IIIIBc")
@@ -313,8 +359,15 @@ def main():
     if pyz is None:
         sys.exit("ERROR: no PYZ entry found in the CArchive — is this a Nighty one-file exe?")
     praw = data[ps+pyz[3]:ps+pyz[3]+pyz[4]]
-    assert praw[:4] == b'PYZ\0'
+    if praw[:4] != b'PYZ\0':
+        sys.exit("ERROR: corrupt PYZ header in Nighty.exe")
     pymagic = praw[4:8]
+    if pymagic != importlib.util.MAGIC_NUMBER:
+        sys.exit(
+            "ERROR: Nighty's PYZ magic %r does not match the selected Python %s magic %r. "
+            "Refusing to generate incompatible bytecode."
+            % (pymagic, python_version_text(running_python), importlib.util.MAGIC_NUMBER)
+        )
     ztocpos = struct.unpack("!i", praw[8:12])[0]
     ztoc = marshal.loads(praw[ztocpos:])  # list of (name,(tc,off,len)) — basic types, OK in 3.8
 
@@ -357,15 +410,16 @@ def main():
         tocbuf += ENTRY.pack(elen, npos, dlen2, ulen2, cflag2, tc) + namefield
     toclen2 = len(tocbuf)
     lenpkg2 = new_tocpos + toclen2 + 88
-    cookie = struct.pack("!8sIIII", cmagic, lenpkg2, new_tocpos, toclen2, pyvers) + pylib_field
-    assert len(cookie) == 88
+    cookie = COOKIE_PREFIX.pack(CARCHIVE_MAGIC, lenpkg2, new_tocpos, toclen2, pyvers) + pylib_field
+    assert len(cookie) == COOKIE_SIZE
     newpkg += tocbuf + cookie
     out = data[:ps] + bytes(newpkg)
     missing = sorted(set(REPLACE_SRC) - {n for n, _, _ in replaced})
     if missing:
         sys.exit("ERROR: no PYZ entry matched %s — refusing to write a stub that still needs a GUI." % missing)
-    how = write_output(OUT, out)
-    print("wrote %s : %d bytes (orig %d, %s)" % (OUT, len(out), total, how))
+    how = write_output(out_path, out)
+    print("wrote %s : %d bytes (orig %d, Python %s, %s)"
+          % (out_path, len(out), total, python_version_text(required_python), how))
 
 if __name__ == "__main__":
     main()

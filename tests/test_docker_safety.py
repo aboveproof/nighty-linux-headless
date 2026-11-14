@@ -52,6 +52,18 @@ class DockerSafetyTests(unittest.TestCase):
         self.assertIn("ln -sf /usr/local/bin/box64 /usr/bin/box64", dockerfile)
         self.assertIn("test -x /usr/bin/box64", dockerfile)
 
+    def test_installer_selects_nightys_embedded_python(self) -> None:
+        installer = (ROOT / "scripts" / "install.sh").read_text(encoding="utf-8")
+        self.assertIn('--print-python-version "$SRC"', installer)
+        self.assertIn('uv python install "$REPACK_PY_VERSION"', installer)
+        self.assertIn('uv python find "$REPACK_PY_VERSION"', installer)
+        self.assertNotIn("uv python install 3.8", installer)
+
+    def test_updater_recreates_nighty_for_replaced_bind_mount(self) -> None:
+        updater = (ROOT / "scripts" / "update.sh").read_text(encoding="utf-8")
+        self.assertIn("docker compose up -d --force-recreate --no-deps nighty", updater)
+        self.assertNotIn("docker compose restart nighty", updater)
+
 
 if __name__ == "__main__":
     unittest.main()
