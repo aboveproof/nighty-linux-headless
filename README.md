@@ -145,11 +145,66 @@ Run `bash scripts/add_account.sh` on the host. It re-opens the same wizard retit
 
 ---
 
-## Updating Nighty
+## Updating
 
-If new fixes or features are pushed to this repository, you can update your deployment instantly without losing any data! 
+Updating **Nighty.exe** and updating this **Linux headless wrapper** are two separate things. Replacing Nighty.exe does not delete your license, tokens, scripts, RPC profiles, or other saved configuration.
 
-**The updater universally supports both Docker and Bare Metal deployments.** It will seamlessly detect which method you used, safely pull the latest changes, cleanly update any dependencies, and restart your container or background service automatically.
+### Updating Nighty.exe
+
+1. Download the new Windows `Nighty.exe` from the official Nighty source.
+2. Connect to your server with WinSCP, FileZilla, or another SFTP client and open your install folder (normally `/home/<user>/nighty-linux-headless`).
+3. Stop Nighty and keep a backup of the working executable:
+
+   **Docker:**
+
+   ```bash
+   cd ~/nighty-linux-headless
+   docker compose stop nighty
+   cp -p Nighty.exe Nighty.exe.previous
+   ```
+
+   **Bare metal:**
+
+   ```bash
+   cd ~/nighty-linux-headless
+   sudo systemctl stop nighty
+   cp -p Nighty.exe Nighty.exe.previous
+   ```
+
+4. Upload the new file into that folder and overwrite the existing file. Its name must remain exactly `Nighty.exe` (capital `N`).
+5. Confirm that the upload is readable and that its embedded Python version can be detected:
+
+   ```bash
+   ls -lh Nighty.exe
+   python3 scripts/repack.py --print-python-version Nighty.exe
+   ```
+
+6. Repack and restart Nighty:
+
+   **Docker:**
+
+   ```bash
+   docker compose up -d --force-recreate --no-deps nighty
+   docker compose logs -f nighty
+   ```
+
+   **Bare metal:**
+
+   ```bash
+   bash scripts/install.sh
+   sudo systemctl restart nighty
+   journalctl -u nighty -f
+   ```
+
+The installer reads the new executable's PyInstaller metadata and uses the matching Python runtime when rebuilding the headless stub. This is important when a Nighty release changes Python versions.
+
+If a new Nighty build is incompatible, stop Nighty, replace `Nighty.exe` with `Nighty.exe.previous`, and repeat step 6. Do not delete the `data/`, `docker-secrets/`, or `.env` files while updating.
+
+### Updating the Linux headless wrapper
+
+If new fixes or features are pushed to this repository, the updater can pull the wrapper changes without removing your Nighty data.
+
+**The updater supports both Docker and bare-metal deployments.** It detects which method you used, updates dependencies, and restarts the container or background service automatically.
 
 ```bash
 bash <(curl -sL https://raw.githubusercontent.com/glowxx/nighty-linux-headless/main/scripts/update.sh)
