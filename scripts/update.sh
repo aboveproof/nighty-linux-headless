@@ -42,8 +42,10 @@ if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
     stashed=1
   fi
 
-  if ! git pull --no-edit origin main; then
-      warn "Failed to pull updates from GitHub. Check your network or git status."
+  # Pull the branch configured for this checkout. Forks and custom deployment
+  # branches must not be forced back onto the upstream repository's main branch.
+  if ! git pull --ff-only; then
+      warn "Failed to fast-forward the configured branch. Check your upstream with: git branch -vv"
       if [ "$stashed" -eq 1 ]; then git stash pop >/dev/null 2>&1 || true; fi
       exit 1
   fi

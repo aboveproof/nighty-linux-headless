@@ -64,6 +64,11 @@ class DockerSafetyTests(unittest.TestCase):
         self.assertIn("docker compose up -d --force-recreate --no-deps nighty", updater)
         self.assertNotIn("docker compose restart nighty", updater)
 
+    def test_updater_follows_the_configured_tracking_branch(self) -> None:
+        updater = (ROOT / "scripts" / "update.sh").read_text(encoding="utf-8")
+        self.assertIn("git pull --ff-only", updater)
+        self.assertNotIn("git pull --no-edit origin main", updater)
+
 
 if __name__ == "__main__":
     unittest.main()

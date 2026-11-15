@@ -207,8 +207,11 @@ If new fixes or features are pushed to this repository, the updater can pull the
 **The updater supports both Docker and bare-metal deployments.** It detects which method you used, updates dependencies, and restarts the container or background service automatically.
 
 ```bash
-bash <(curl -sL https://raw.githubusercontent.com/glowxx/nighty-linux-headless/main/scripts/update.sh)
+cd ~/nighty-linux-headless
+bash scripts/update.sh
 ```
+
+The local updater follows the Git branch configured for your checkout. This is important for forks or custom deployment branches; downloading another repository's updater with `curl` can try to pull the wrong branch.
 
 ---
 
