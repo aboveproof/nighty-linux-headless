@@ -57,7 +57,9 @@ export NIGHTY_DIAG_DIR
 
 export WINEPREFIX
 export WINEARCH=win64
-export WINEDEBUG=-all
+export QT_QPA_PLATFORM="${QT_QPA_PLATFORM:-offscreen}"
+export QT_OPENGL="${QT_OPENGL:-software}"
+export WINEDEBUG="${WINEDEBUG:--all}"
 export DISPLAY=":$DISPLAY_NUM"
 export NIGHTY_STUB_PORT="$STUB_PORT"
 export NIGHTY_RPC_GUARD

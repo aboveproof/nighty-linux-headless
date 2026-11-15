@@ -16,11 +16,6 @@ ENTRY = struct.Struct("!IIIIBc")
 REPACK_TIMEOUT = 60
 
 
-def current_cookie_version() -> int:
-    major, minor = sys.version_info[:2]
-    return major * 100 + minor if minor >= 10 else major * 10 + minor
-
-
 def run_repack(src: Path, out: Path) -> subprocess.CompletedProcess:
     return subprocess.run(
         [sys.executable, str(REPACK), str(src), str(out)],
@@ -30,51 +25,53 @@ def run_repack(src: Path, out: Path) -> subprocess.CompletedProcess:
     )
 
 
-def build_archive_with_toc(toc: bytes, pyvers: int | None = None) -> bytes:
+def build_archive_with_toc(toc: bytes) -> bytes:
     prefix = b"MZ" + b"\0" * 254
     tocpos = 0
     toclen = len(toc)
     lenpkg = toclen + 88
-    cookie = struct.pack(
-        "!8sIIII", COOKIE_MAGIC, lenpkg, tocpos, toclen,
-        current_cookie_version() if pyvers is None else pyvers,
-    ) + b"\0" * 64
+    cookie = struct.pack("!8sIIII", COOKIE_MAGIC, lenpkg, tocpos, toclen, 38) + b"\0" * 64
     return prefix + toc + cookie
 
 
 class RepackOutputGuardTests(unittest.TestCase):
-    def test_prints_legacy_python_version_from_cookie(self) -> None:
+    def test_mismatched_python_is_rejected_before_loading_bytecode(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            src = Path(tmp) / "Nighty.exe"
-            src.write_bytes(build_archive_with_toc(b"", pyvers=38))
-            result = subprocess.run(
-                [sys.executable, str(REPACK), "--print-python-version", str(src)],
-                capture_output=True, text=True, timeout=REPACK_TIMEOUT,
-            )
-            self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertEqual(result.stdout.strip(), "3.8")
-
-    def test_prints_python_314_version_from_tester_cookie(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            src = Path(tmp) / "Nighty-tester.exe"
-            src.write_bytes(build_archive_with_toc(b"", pyvers=314))
-            result = subprocess.run(
-                [sys.executable, str(REPACK), "--print-python-version", str(src)],
-                capture_output=True, text=True, timeout=REPACK_TIMEOUT,
-            )
-            self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertEqual(result.stdout.strip(), "3.14")
-
-    def test_refuses_mismatched_python_before_writing_output(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            src = Path(tmp) / "Nighty.exe"
-            out = Path(tmp) / "Nighty_stub.exe"
-            mismatch = 38 if sys.version_info[:2] != (3, 8) else 314
-            src.write_bytes(build_archive_with_toc(b"", pyvers=mismatch))
+            src = Path(tmp) / 'Nighty.exe'
+            out = Path(tmp) / 'Nighty_stub.exe'
+            name = b'PYZ.pyz\0'
+            toc = ENTRY.pack(ENTRY.size + len(name), 0, 0, 0, 0, b'z') + name
+            archive = bytearray(build_archive_with_toc(toc))
+            version = 314 if sys.version_info[:2] != (3, 14) else 38
+            struct.pack_into('!I', archive, len(archive) - 68, version)
+            src.write_bytes(archive)
             result = run_repack(src, out)
             self.assertNotEqual(result.returncode, 0)
-            self.assertIn("marshal formats must match", (result.stdout + result.stderr).lower())
+            self.assertIn('repack requires Python', result.stderr)
             self.assertFalse(out.exists())
+
+    def test_version_detection_rejects_missing_or_truncated_cookie(self) -> None:
+        for payload in (b'MZ', b'MZ' + COOKIE_MAGIC):
+            with self.subTest(payload=payload), tempfile.TemporaryDirectory() as tmp:
+                src = Path(tmp) / 'Nighty.exe'
+                src.write_bytes(payload)
+                result = subprocess.run(
+                    [sys.executable, str(REPACK), '--python-version', str(src)],
+                    capture_output=True, text=True, timeout=REPACK_TIMEOUT)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn('cookie not found or truncated', result.stderr)
+
+    def test_reports_embedded_python_without_loading_bytecode(self) -> None:
+        for version, expected in ((38, '3.8'), (314, '3.14')):
+            with self.subTest(version=version), tempfile.TemporaryDirectory() as tmp:
+                src = Path(tmp) / 'Nighty.exe'
+                archive = bytearray(build_archive_with_toc(b''))
+                struct.pack_into('!I', archive, len(archive) - 68, version)
+                src.write_bytes(archive)
+                result = subprocess.run([sys.executable, str(REPACK), '--python-version', str(src)],
+                                        capture_output=True, text=True, timeout=REPACK_TIMEOUT)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(result.stdout.strip(), expected)
 
     def test_refuses_to_write_over_the_source(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

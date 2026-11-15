@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """
 Repack YOUR Nighty.exe, replacing the bundled `webview` package with a headless
-stub. This lets Nighty's backend (and its native Web UI) start on a machine that
+stub and adapting the Qt bootstrap for offscreen operation. Nighty's backend
+(and its native Web UI) can then start on a machine that
 cannot render the desktop GUI (a headless Linux host under Wine) without touching
 Nighty's license check or its protected code.
 
@@ -11,54 +12,19 @@ Nighty's license check or its protected code.
   • The stub captures the JS-API bridge and exposes a loopback-only control
     server (default 127.0.0.1:8765) used during first-run onboarding.
 
-IMPORTANT: the marshal format of the injected code must match Nighty's embedded
-Python runtime. The installer reads that version from the PyInstaller cookie and
-fetches the exact interpreter through `uv` before invoking this script.
+IMPORTANT: run this under the Python version embedded in the source executable.
+The installer detects that version and fetches a matching interpreter via uv.
 
 Usage:
     python repack.py [SRC.exe] [OUT.exe]
-    python repack.py --print-python-version [SRC.exe]
+    python repack.py --python-version SRC.exe
 Env:
     NIGHTY_STUB_PORT   control-server port inside the stub (default 8765)
     NIGHTY_STUB_LOG    optional wine path for the stub log (e.g. Z:\\tmp\\stub.log)
 """
-import struct, marshal, zlib, sys, os, errno, importlib.util
+import struct, marshal, zlib, sys, os, errno
 
 BIND_MOUNT_ERRNOS = (errno.EBUSY, errno.EXDEV)
-CARCHIVE_MAGIC = b'MEI\014\013\012\013\016'
-COOKIE_PREFIX = struct.Struct("!8sIIII")
-COOKIE_SIZE = 88
-
-
-def python_version_from_cookie(pyvers):
-    """Convert PyInstaller's compact cookie value (38, 310, 314) to (3, n)."""
-    if pyvers >= 100:
-        version = (pyvers // 100, pyvers % 100)
-    else:
-        version = (pyvers // 10, pyvers % 10)
-    if version[0] != 3 or not (0 <= version[1] <= 99):
-        raise ValueError("unsupported PyInstaller Python version value %r" % pyvers)
-    return version
-
-
-def read_cookie(path):
-    if not os.path.isfile(path):
-        raise ValueError("source binary not found: %s (drop your Nighty.exe there)" % path)
-    with open(path, "rb") as fh:
-        data = fh.read()
-    ci = data.rfind(CARCHIVE_MAGIC)
-    if ci < 0 or ci + COOKIE_SIZE > len(data):
-        raise ValueError("PyInstaller CArchive cookie not found — is this a Nighty one-file exe?")
-    mg, lenpkg, tocpos, toclen, pyvers = COOKIE_PREFIX.unpack(data[ci:ci + COOKIE_PREFIX.size])
-    try:
-        pyversion = python_version_from_cookie(pyvers)
-    except ValueError as exc:
-        raise ValueError(str(exc))
-    return data, ci, lenpkg, tocpos, toclen, pyvers, pyversion
-
-
-def python_version_text(version):
-    return "%d.%d" % version
 
 
 def write_output(path, payload):
@@ -88,6 +54,9 @@ def write_output(path, payload):
         pass
     return "in-place (target is a bind mount)"
 
+
+SRC = sys.argv[1] if len(sys.argv) > 1 else os.environ.get("NIGHTY_EXE", "Nighty.exe")
+OUT = sys.argv[2] if len(sys.argv) > 2 else os.environ.get("NIGHTY_STUB", "Nighty_stub.exe")
 
 # The stub `webview` module. Port and log path are read from the environment at
 # runtime (inside wine), so nothing is hardcoded.
@@ -226,10 +195,8 @@ def _start_ctl():
             except Exception as e:
                 return self._send({"ok":False,"error":"lookup %r"%(e,)},400)
             if req.get("async"):
-                def _bg():
-                    try: _log("CTL async api[%d].%s ->" % (idx,method), fn(*args,**kwargs))
-                    except Exception as e: _log("CTL async api[%d].%s RAISED %r" % (idx,method,e))
-                threading.Thread(target=_bg, daemon=True, name="ctl-async").start()
+                # Non-blocking HTTP must not mean a different asyncio owner thread.
+                _taskq.put((fn, args, kwargs, {}, threading.Event()))
                 return self._send({"ok":True,"started":True,"method":method})
             # dispatch onto the start() thread (single consistent event-loop, like real pywebview)
             _log("CTL call api[%d].%s (dispatch to main)" % (idx, method))
@@ -312,37 +279,53 @@ def compile_blob(name, src):
     code = compile(src, '<stub:%s>' % name, 'exec')
     return zlib.compress(marshal.dumps(code), 9)
 
-def main(argv=None):
-    args = list(sys.argv[1:] if argv is None else argv)
-    if args and args[0] == "--print-python-version":
-        if len(args) != 2:
-            sys.exit("ERROR: usage: repack.py --print-python-version Nighty.exe")
-        try:
-            cookie = read_cookie(args[1])
-        except ValueError as exc:
-            sys.exit("ERROR: %s" % exc)
-        print(python_version_text(cookie[-1]))
-        return 0
+# Wine can report a cursor position outside Xvfb's single virtual monitor.
+QT_SCREEN_HOOK = r'''
+from PyQt6.QtGui import QGuiApplication
+from PyQt6.QtWidgets import QApplication
+_nighty_qt_init = QApplication.__init__
+def _nighty_headless_qt_init(self, argv, **kwargs):
+    _nighty_qt_init(self, list(argv) + ['-platform', 'offscreen'], **kwargs)
+QApplication.__init__ = _nighty_headless_qt_init
+_nighty_screen_at = QGuiApplication.screenAt
+_nighty_primary_screen = QGuiApplication.primaryScreen
+_nighty_qt_app = None
+def _nighty_headless_primary_screen():
+    global _nighty_qt_app
+    if QGuiApplication.instance() is None:
+        _nighty_qt_app = QApplication([])
+    return _nighty_primary_screen()
+def _nighty_headless_screen_at(point):
+    primary = _nighty_headless_primary_screen()
+    return _nighty_screen_at(point) or primary
+QGuiApplication.primaryScreen = staticmethod(_nighty_headless_primary_screen)
+QGuiApplication.screenAt = staticmethod(_nighty_headless_screen_at)
+'''
 
-    src = args[0] if args else os.environ.get("NIGHTY_EXE", "Nighty.exe")
-    out_path = args[1] if len(args) > 1 else os.environ.get("NIGHTY_STUB", "Nighty_stub.exe")
-    if len(args) > 2:
-        sys.exit("ERROR: usage: repack.py [SRC.exe] [OUT.exe]")
-    if os.path.abspath(out_path) == os.path.abspath(src):
-        sys.exit("ERROR: output path must differ from the source path (%s) — refusing to overwrite your licensed binary." % src)
-    try:
-        data, ci, lenpkg, tocpos, toclen, pyvers, required_python = read_cookie(src)
-    except ValueError as exc:
-        sys.exit("ERROR: %s" % exc)
-    running_python = sys.version_info[:2]
-    if running_python != required_python:
-        sys.exit(
-            "ERROR: Nighty.exe embeds Python %s but repack.py is running under Python %s. "
-            "The marshal formats must match; run scripts/install.sh so uv can select the exact interpreter."
-            % (python_version_text(required_python), python_version_text(running_python))
-        )
+def main():
+    if len(sys.argv) == 3 and sys.argv[1] == '--python-version':
+        data = open(sys.argv[2], 'rb').read()
+        ci = data.rfind(b'MEI\014\013\012\013\016')
+        if ci < 0 or ci + 88 > len(data):
+            sys.exit('ERROR: PyInstaller CArchive cookie not found or truncated.')
+        version = struct.unpack_from('!I', data, ci + 20)[0]
+        major, minor = divmod(version, 100 if version >= 100 else 10)
+        if major != 3 or minor < 8:
+            sys.exit('ERROR: unsupported embedded Python version: %s' % version)
+        print('%d.%d' % (major, minor))
+        return
+    if not os.path.isfile(SRC):
+        sys.exit("ERROR: source binary not found: %s (drop your Nighty.exe there)" % SRC)
+    if os.path.abspath(OUT) == os.path.abspath(SRC):
+        sys.exit("ERROR: output path must differ from the source path (%s) — refusing to overwrite your licensed binary." % SRC)
+    data = open(SRC, "rb").read()
     total = len(data)
-    pylib_field = data[ci + COOKIE_PREFIX.size:ci + COOKIE_SIZE]
+    cmagic = b'MEI\014\013\012\013\016'
+    ci = data.rfind(cmagic)
+    if ci < 0:
+        sys.exit("ERROR: PyInstaller CArchive cookie not found — is this a Nighty one-file exe?")
+    mg, lenpkg, tocpos, toclen, pyvers = struct.unpack("!8sIIII", data[ci:ci+24])
+    pylib_field = data[ci+24:ci+24+64]
     ps = total - lenpkg
     toc = data[ps+tocpos:ps+tocpos+toclen]
     ENTRY = struct.Struct("!IIIIBc")
@@ -358,18 +341,15 @@ def main(argv=None):
     pyz = next((e for e in entries if e[1] == b'z'), None)
     if pyz is None:
         sys.exit("ERROR: no PYZ entry found in the CArchive — is this a Nighty one-file exe?")
+    expected = divmod(pyvers, 100 if pyvers >= 100 else 10)
+    if sys.version_info[:2] != expected:
+        sys.exit('ERROR: repack requires Python %d.%d to match the executable; got %d.%d.'
+                 % (expected + sys.version_info[:2]))
     praw = data[ps+pyz[3]:ps+pyz[3]+pyz[4]]
-    if praw[:4] != b'PYZ\0':
-        sys.exit("ERROR: corrupt PYZ header in Nighty.exe")
+    assert praw[:4] == b'PYZ\0'
     pymagic = praw[4:8]
-    if pymagic != importlib.util.MAGIC_NUMBER:
-        sys.exit(
-            "ERROR: Nighty's PYZ magic %r does not match the selected Python %s magic %r. "
-            "Refusing to generate incompatible bytecode."
-            % (pymagic, python_version_text(running_python), importlib.util.MAGIC_NUMBER)
-        )
     ztocpos = struct.unpack("!i", praw[8:12])[0]
-    ztoc = marshal.loads(praw[ztocpos:])  # list of (name,(tc,off,len)) — basic types, OK in 3.8
+    ztoc = marshal.loads(praw[ztocpos:])
 
     DATA_START = 12
     newdata = bytearray()
@@ -395,6 +375,13 @@ def main(argv=None):
     for name, tc, cflag, epos, dlen, ulen in entries:
         if tc == b'z':
             blob = newpyz; dlen2 = len(newpyz); ulen2 = len(newpyz); cflag2 = 0
+        elif tc == b's' and name == 'pyi_rth_pyqt6':
+            original = data[ps+epos:ps+epos+dlen]
+            original = zlib.decompress(original) if cflag else original
+            wrapper = 'import marshal\nexec(marshal.loads(%r))\n%s' % (original, QT_SCREEN_HOOK)
+            raw = marshal.dumps(compile(wrapper, '<headless-qt-screen>', 'exec'))
+            blob = zlib.compress(raw, 9) if cflag else raw
+            dlen2 = len(blob); ulen2 = len(raw); cflag2 = cflag
         else:
             blob = data[ps+epos:ps+epos+dlen]; dlen2 = dlen; ulen2 = ulen; cflag2 = cflag
         npos = len(newpkg)
@@ -410,16 +397,15 @@ def main(argv=None):
         tocbuf += ENTRY.pack(elen, npos, dlen2, ulen2, cflag2, tc) + namefield
     toclen2 = len(tocbuf)
     lenpkg2 = new_tocpos + toclen2 + 88
-    cookie = COOKIE_PREFIX.pack(CARCHIVE_MAGIC, lenpkg2, new_tocpos, toclen2, pyvers) + pylib_field
-    assert len(cookie) == COOKIE_SIZE
+    cookie = struct.pack("!8sIIII", cmagic, lenpkg2, new_tocpos, toclen2, pyvers) + pylib_field
+    assert len(cookie) == 88
     newpkg += tocbuf + cookie
     out = data[:ps] + bytes(newpkg)
     missing = sorted(set(REPLACE_SRC) - {n for n, _, _ in replaced})
     if missing:
         sys.exit("ERROR: no PYZ entry matched %s — refusing to write a stub that still needs a GUI." % missing)
-    how = write_output(out_path, out)
-    print("wrote %s : %d bytes (orig %d, Python %s, %s)"
-          % (out_path, len(out), total, python_version_text(required_python), how))
+    how = write_output(OUT, out)
+    print("wrote %s : %d bytes (orig %d, %s)" % (OUT, len(out), total, how))
 
 if __name__ == "__main__":
     main()

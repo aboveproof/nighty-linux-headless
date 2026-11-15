@@ -39,6 +39,8 @@ WINE_NATIVE_LIBS = (
     ("Xi", "libxi6", True),
     ("Xcursor", "libxcursor1", True),
     ("Xinerama", "libxinerama1", True),
+    ("EGL", "libegl1", True),
+    ("cups", "libcups2", True),
     ("xkbregistry", "libxkbregistry0", False),
 )
 
@@ -92,8 +94,8 @@ KNOWN_FAILURES = (
     (
         "bad-marshal-data",
         re.compile(r"bad marshal data"),
-        "The repack ran under the wrong Python. Marshal formats are version-specific; re-run "
-        "scripts/install.sh so it can detect Nighty's embedded runtime and fetch the exact interpreter via uv.",
+        "The repack ran under the wrong Python. The marshal format is version-specific; "
+        "re-run install.sh to detect the executable's Python version and fetch a matching interpreter.",
     ),
     (
         "missing-license",

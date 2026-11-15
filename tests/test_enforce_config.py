@@ -75,6 +75,18 @@ class EnforceConfigTests(unittest.TestCase):
             self.assertIn("guard disabled", enforce_config.stop_unsafe_running_profile())
             stub.assert_not_called()
 
+    def test_migrates_active_account_without_overriding_new_selection(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / 'nighty.config'
+            path.write_text(json.dumps({'web': True, 'logins': {'old': {'active': True}}}))
+            enforce_config.enforce_web(tmp)
+            data = json.loads(path.read_text())
+            self.assertEqual(data['active_account'], 'old')
+            data['active_account'] = 'new'
+            path.write_text(json.dumps(data))
+            enforce_config.enforce_web(tmp)
+            self.assertEqual(json.loads(path.read_text())['active_account'], 'new')
+
     def test_enforce_web_backup_and_recovery(self):
         with tempfile.TemporaryDirectory() as tmp:
             appdata = tmp
